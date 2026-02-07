@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SimpleTask — исправленная версия</title>
+
+<!--
+SimpleTask — single HTML/CSS/JS
+Где менять стили: :root CSS-переменные (accent, text, card sizes и т.д.)
+Сохранение — localStorage (ключи simpletask.tasks, simpletask.settings)
+-->
+
+<style>
+  :root{
+    --app-font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --bg: #ffffff; --bg-alt-start:#f7fbff; --bg-alt-end:#ffffff;
+    --surface:#ffffff; --text:#0f1724; --muted:#55606a;
+    --accent:#2563eb; --accent-2:#06b6d4; --danger:#ef4444; --success:#10b981;
+    --radius:12px; --shadow-soft:0 8px 26px rgba(15,23,42,0.06); --shadow-strong:0 16px 48px rgba(15,23,42,0.10);
+    --card-min-w:160px; --card-min-h:84px; --card-max-w:760px; --card-max-h:1100px;
+    --transition:240ms cubic-bezier(.2,.9,.3,1);
+  }
+  [data-theme="dark"]{
+    --bg: #06060a; --bg-alt-start:#07070b; --bg-alt-end:#0b0c10;
+    --surface: rgba(18,20,25,0.92); --text:#e6eef8; --muted:#9aa4b2;
+    --accent:#60a5fa; --accent-2:#34d399; --danger:#fb7185; --success:#34d399;
+    --shadow-soft:0 10px 34px rgba(2,6,23,0.6); --shadow-strong:0 18px 60px rgba(2,6,23,0.7);
+  }
+
+  html.theme-anim * { transition: background-color var(--transition), color var(--transition), box-shadow var(--transition), border-color var(--transition); }
+
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:var(--app-font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  body{background:linear-gradient(180deg,var(--bg-alt-start),var(--bg-alt-end)); transition:background var(--transition)}
+  .app{min-height:100vh;display:flex;flex-direction:column;gap:14px;padding:18px}
+
+  header{display:flex;gap:14px;align-items:center;justify-content:space-between}
+  .brand{display:flex;gap:12px;align-items:center}
+  .logo{width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:var(--shadow-strong);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:18px}
+  .title{margin:0;font-size:18px}
+  .subtitle{margin:0;font-size:13px;color:var(--muted)}
+
+  .top-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .task-form{display:flex;gap:8px;align-items:center;padding:10px 12px;border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);box-shadow:var(--shadow-soft)}
+  .task-form input[type="text"], .task-form input[type="date"], .task-form textarea, .task-form select{border:1px solid rgba(0,0,0,0.06);padding:8px 10px;border-radius:10px;background:transparent;font-size:14px;color:var(--text)}
+  .task-form textarea{width:240px;min-height:46px;display:none}
+  .pal{width:28px;height:28px;border-radius:6px;border:none;padding:0;cursor:pointer}
+
+  .btn{background:var(--accent);color:white;border:none;padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700}
+  .btn.secondary{background:transparent;color:var(--text);border:1px solid rgba(0,0,0,0.06)}
+
+  .canvas{position:relative;flex:1;padding:22px;border-radius:16px;min-height:60vh;overflow:auto;box-shadow:var(--shadow-soft);
+    background:
+      radial-gradient(600px 300px at 10% 10%, rgba(37,99,235,0.03), transparent 8%),
+      radial-gradient(500px 250px at 90% 90%, rgba(6,182,212,0.02), transparent 6%),
+      linear-gradient(180deg, rgba(255,255,255,0.02), transparent)}
+  [data-theme="dark"] .canvas{ background:
+    radial-gradient(600px 300px at 10% 10%, rgba(96,165,250,0.02), transparent 8%),
+    radial-gradient(500px 250px at 90% 90%, rgba(52,211,153,0.02), transparent 6%),
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent) }
+  .canvas::before{content:"";position:absolute;inset:0;border-radius:16px;pointer-events:none;background-image:linear-gradient(transparent 22px, rgba(0,0,0,0.02) 23px),linear-gradient(90deg, transparent 22px, rgba(0,0,0,0.02) 23px);background-size:24px 24px;opacity:0.26;mix-blend-mode:overlay}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;align-content:start}
+  .free-mode{position:relative;min-height:320px}
+
+  /* CARD */
+  .card{min-width:var(--card-min-w);min-height:var(--card-min-h);max-width:var(--card-max-w);max-height:var(--card-max-h);border-radius:12px;padding:14px;box-shadow:var(--shadow-soft);display:flex;justify-content:space-between;gap:12px;align-items:flex-start;cursor:grab;transition:transform var(--transition),box-shadow var(--transition),opacity 160ms ease,background-color var(--transition);user-select:none;position:relative;overflow:visible}
+  .card:active{cursor:grabbing}
+  .card.dragging{transform:scale(1.03);box-shadow:var(--shadow-strong);z-index:9999}
+  .card .left{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+  /* Заголовок: перенос по словам, разрешаем переносы между словами, не ломаем на символы */
+  .card h3{margin:0;font-size:16px;line-height:1.18;white-space:normal;overflow-wrap:break-word;word-break:normal}
+  .meta{font-size:13px;color:var(--muted);display:flex;gap:10px;align-items:center}
+  .desc{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .right{display:flex;flex-direction:column;gap:10px;align-items:flex-end;min-width:92px}
+  .big-btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 12px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;border:none;min-width:74px}
+  .big-btn.neutral{background:rgba(0,0,0,0.06)}
+  .card.overdue{box-shadow:0 10px 34px rgba(239,68,68,0.06);border-left:4px solid var(--danger)}
+  .card.done{opacity:0.78;filter:grayscale(0.02)}
+
+  .resizer{width:18px;height:18px;border-radius:4px;position:absolute;right:8px;bottom:8px;cursor:se-resize;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.06)}
+  .color-dot{width:12px;height:12px;border-radius:6px;position:absolute;left:10px;top:10px;box-shadow:0 3px 10px rgba(0,0,0,0.08);border:2px solid rgba(255,255,255,0.18)}
+
+  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.5);z-index:20000;padding:18px}
+  .panel{background:var(--surface);padding:16px;border-radius:12px;width:100%;max-width:560px;box-shadow:var(--shadow-strong)}
+
+  .toast-wrap{position:fixed;right:18px;bottom:18px;z-index:99999;display:flex;flex-direction:column;gap:10px}
+  .toast{background:var(--surface);color:var(--text);padding:10px 12px;border-radius:10px;box-shadow:var(--shadow-strong);font-size:13px}
+
+  footer{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:13px;color:var(--muted);padding:6px 0}
+  @media (max-width:720px){ .task-form textarea{display:none} .grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))} }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <div class="brand">
+      <div class="logo">ST</div>
+      <div>
+        <h1 class="title">SimpleTask</h1>
+        <div class="subtitle">Свободное перемещение • localStorage</div>
+      </div>
+    </div>
+
+    <div class="top-controls" role="region" aria-label="Управление">
+      <div class="task-form" role="region" aria-label="Создать задачу">
+        <input id="title" type="text" placeholder="Заголовок *" aria-label="Заголовок задачи" />
+        <input id="due" type="date" aria-label="Дата до" />
+        <div class="color-picker" title="Цвет карточки">
+          <button type="button" class="pal" data-color="#FFFFFF" style="background:linear-gradient(180deg,#fff,#f3f4f6)"></button>
+          <button type="button" class="pal" data-color="#E8F0FE" style="background:linear-gradient(180deg,#e8f0fe,#dbeafe)"></button>
+          <button type="button" class="pal" data-color="#FEF3C7" style="background:linear-gradient(180deg,#fef3c7,#fde68a)"></button>
+          <button type="button" class="pal" data-color="#FCE7F3" style="background:linear-gradient(180deg,#fce7f3,#fbcfe8)"></button>
+        </div>
+        <button id="toggle-desc" class="icon" type="button">📝</button>
+        <textarea id="desc" placeholder="Описание (опционально)"></textarea>
+        <button id="addBtn" class="btn small" type="button">Добавить</button>
+      </div>
+
+      <div class="toolbar" role="toolbar" aria-label="Фильтры">
+        <select id="filter"><option value="all">Все</option><option value="done">Решённые</option><option value="todo">Не решённые</option></select>
+        <select id="sort"><option value="none">Без сортировки</option><option value="asc">По дате ↑</option><option value="desc">По дате ↓</option></select>
+        <button id="modeToggle" class="btn secondary small" type="button">Grid / Free</button>
+        <button id="themeToggle" class="btn secondary small" type="button">Тема</button>
+        <button id="clearBtn" class="btn secondary small" type="button" style="color:var(--danger);border-color:rgba(239,68,68,0.12)">Сброс</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="canvas" class="canvas free-mode" tabindex="0" aria-label="Рабочая область задач"></main>
+
+  <footer>
+    <div id="status">Задач: <span id="count">0</span></div>
+    <div style="font-size:13px;color:var(--muted)">Двойной клик — редактировать • Тянуть угол — изменить размер</div>
+  </footer>
+</div>
+
+<!-- Edit modal -->
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h2 style="margin:0 0 8px 0">Редактировать задачу</h2>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <input id="edit-title" type="text" placeholder="Заголовок" />
+      <input id="edit-due" type="date" />
+      <textarea id="edit-desc" placeholder="Описание"></textarea>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:13px;color:var(--muted)">Цвет:</label>
+        <input id="edit-color" type="color" value="#ffffff" style="width:56px;height:36px;border-radius:8px;border:none"/>
+        <label style="margin-left:auto;font-size:13px;color:var(--muted)"><input id="edit-done" type="checkbox"> Выполнено</label>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="save-edit" class="btn" type="button">Сохранить</button>
+        <button id="cancel-edit" class="btn secondary" type="button">Отмена</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+/* Исправленная логика: все обработчики назначаются в makeCard, cloneNode не используется.
+   Сохранение размеров/цветов/позиций в localStorage.
+*/
+
+const uid = (n=6)=>Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,n+2);
+const todayISO = ()=> new Date().toISOString().slice(0,10);
+const $ = s => document.querySelector(s);
+
+const STORE_TASKS = 'simpletask.tasks';
+const STORE_SETTINGS = 'simpletask.settings';
+let tasks = [];
+let settings = { mode:'free', theme:'light', filter:'all', sort:'none', selectedPaletteColor:'#FFFFFF' };
+
+const canvas = $('#canvas');
+const addBtn = $('#addBtn');
+const titleInput = $('#title');
+const descInput = $('#desc');
+const dueInput = $('#due');
+const toggleDescBtn = $('#toggle-desc');
+const palBtns = document.querySelectorAll('.pal');
+const filterSel = $('#filter');
+const sortSel = $('#sort');
+const modeToggle = $('#modeToggle');
+const themeToggle = $('#themeToggle');
+const clearBtn = $('#clearBtn');
+const statusCount = $('#count');
+const modal = $('#modal');
+const editTitle = $('#edit-title');
+const editDesc = $('#edit-desc');
+const editDue = $('#edit-due');
+const editColor = $('#edit-color');
+const editDone = $('#edit-done');
+const saveEditBtn = $('#save-edit');
+const cancelEditBtn = $('#cancel-edit');
+const toasts = $('#toasts');
+
+function loadState(){
+  try { const s = localStorage.getItem(STORE_SETTINGS); if(s) settings = Object.assign(settings, JSON.parse(s)); } catch(e){ console.warn(e); }
+  try { const t = localStorage.getItem(STORE_TASKS); if(t) tasks = JSON.parse(t); else tasks = []; } catch(e){ console.warn(e); tasks = []; }
+  applyTheme(true);
+}
+function saveState(){ try { localStorage.setItem(STORE_TASKS, JSON.stringify(tasks)); localStorage.setItem(STORE_SETTINGS, JSON.stringify(settings)); } catch(e){ console.warn(e); } }
+function showToast(msg, timeout=2200){ const t = document.createElement('div'); t.className='toast'; t.textContent=msg; toasts.appendChild(t); setTimeout(()=>{ t.style.opacity='0'; t.addEventListener('transitionend', ()=> t.remove(), {once:true}); }, timeout); }
+
+/* contrast helpers */
+function hexToRgb(hex){ if(!hex) return [255,255,255]; hex=hex.replace('#',''); if(hex.length===3) hex=hex.split('').map(x=>x+x).join(''); const n=parseInt(hex,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+function relativeLuminance([r,g,b]){ const srgb=[r/255,g/255,b/255].map(c=>c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4)); return 0.2126*srgb[0]+0.7152*srgb[1]+0.0722*srgb[2]; }
+function chooseForeground(hex){ const L = relativeLuminance(hexToRgb(hex)); return L > 0.55 ? '#000000' : '#ffffff'; }
+
+/* make card with full set of event handlers (no later cloning) */
+function makeCard(task){
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.id = task.id;
+  card.tabIndex = 0;
+
+  // background & fg
+  card.style.background = task.color || '#ffffff';
+  const fg = chooseForeground(task.color || '#ffffff');
+  card.style.color = fg;
+
+  // left
+  const left = document.createElement('div'); left.className='left';
+  const h3 = document.createElement('h3'); h3.textContent = task.title;
+  const meta = document.createElement('div'); meta.className='meta';
+  const dateSpan = document.createElement('span'); dateSpan.textContent = task.due || '—';
+  if(task.due && task.due < todayISO() && !task.done) dateSpan.style.color = getComputedStyle(document.documentElement).getPropertyValue('--danger') || '#ef4444';
+  meta.appendChild(dateSpan);
+  const descEl = document.createElement('div'); descEl.className='desc'; descEl.textContent = task.desc || '';
+
+  left.appendChild(h3); left.appendChild(meta); left.appendChild(descEl);
+
+  // right actions
+  const right = document.createElement('div'); right.className='right';
+  const toggle = document.createElement('button'); toggle.type='button'; toggle.className='big-btn neutral';
+  toggle.textContent = task.done ? '✔︎ Решено' : '○ Не решено';
+  toggle.style.backgroundColor = fg === '#000000' ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)';
+  toggle.style.color = fg;
+  toggle.addEventListener('click', (e)=>{ e.stopPropagation(); task.done = !task.done; saveState(); render(); });
+
+  const infoBtn = document.createElement('button'); infoBtn.type='button'; infoBtn.className='big-btn neutral'; infoBtn.textContent='ℹ️';
+  infoBtn.style.backgroundColor = toggle.style.backgroundColor; infoBtn.style.color = fg;
+  infoBtn.addEventListener('click', (e)=>{ e.stopPropagation(); showToast(`${task.title}${task.desc ? ' — '+task.desc:''}${task.due ? ' • До: '+task.due:''}`, 3000); });
+
+  const editBtn = document.createElement('button'); editBtn.type='button'; editBtn.className='big-btn neutral'; editBtn.textContent='✏️';
+  editBtn.style.backgroundColor = toggle.style.backgroundColor; editBtn.style.color = fg;
+  editBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openEdit(task.id); });
+
+  const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='big-btn neutral'; delBtn.textContent='🗑️';
+  delBtn.style.backgroundColor = toggle.style.backgroundColor; delBtn.style.color = fg;
+  delBtn.addEventListener('click', (e)=>{ e.stopPropagation(); card.classList.add('animate-out'); setTimeout(()=>{ tasks = tasks.filter(t=>t.id!==task.id); saveState(); render(); showToast('Задача удалена'); }, 160); });
+
+  const actionRow = document.createElement('div'); actionRow.style.display='flex'; actionRow.style.gap='8px';
+  actionRow.appendChild(infoBtn); actionRow.appendChild(editBtn); actionRow.appendChild(delBtn);
+
+  right.appendChild(toggle); right.appendChild(actionRow);
+
+  card.appendChild(left); card.appendChild(right);
+
+  // color dot
+  const colorDot = document.createElement('div'); colorDot.className='color-dot'; colorDot.style.background = task.color || '#fff';
+  card.appendChild(colorDot);
+
+  // resizer
+  const resizer = document.createElement('div'); resizer.className='resizer'; resizer.title='Изменить размер';
+  card.appendChild(resizer);
+
+  // width/height from task
+  if (task.w) card.style.width = task.w + 'px';
+  if (task.h) card.style.height = task.h + 'px';
+
+  // double click edit
+  card.addEventListener('dblclick', ()=> openEdit(task.id));
+
+  // keyboard handlers
+  card.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') openEdit(task.id); if (e.key === ' ') { e.preventDefault(); task.done = !task.done; saveState(); render(); } });
+
+  // drag start on pointerdown (if free mode)
+  card.addEventListener('pointerdown', (e)=>{
+    if (e.target.closest('.resizer') || e.target.closest('.big-btn')) return;
+    if (settings.mode !== 'free') return;
+    startDragCard(e, card, task);
+  });
+
+  // resizer listener
+  resizer.addEventListener('pointerdown', (e)=>{ e.stopPropagation(); startResizeCard(e, card, task); });
+
+  return card;
+}
+
+/* try to expand card when title fits within max width; otherwise title will wrap */
+function adjustCardForTitle(card, task){
+  const h3 = card.querySelector('h3');
+  const right = card.querySelector('.right');
+  if (!h3 || !right) return;
+  // measure single-line width
+  const prevWS = h3.style.whiteSpace || '';
+  h3.style.whiteSpace = 'nowrap';
+  const titleW = h3.scrollWidth;
+  h3.style.whiteSpace = prevWS || 'normal';
+
+  const rightW = right.getBoundingClientRect().width;
+  const padding = 40;
+  const required = titleW + rightW + padding;
+  const maxW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-max-w')) || 760;
+  const minW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-min-w')) || 160;
+  const currentW = card.getBoundingClientRect().width;
+
+  if (required > currentW && required <= maxW){
+    const newW = Math.max(minW, Math.min(required, maxW));
+    card.style.width = newW + 'px';
+    task.w = newW;
+    saveState();
+  } else {
+    // allow wrapping
+    h3.style.whiteSpace = 'normal';
+  }
+}
+
+/* render all */
+function render(){
+  canvas.className = 'canvas';
+  canvas.classList.add(settings.mode==='grid' ? 'grid' : 'free-mode');
+
+  let arr = tasks.slice();
+  if (settings.filter === 'done') arr = arr.filter(t=>t.done);
+  if (settings.filter === 'todo') arr = arr.filter(t=>!t.done);
+  if (settings.sort === 'asc') arr.sort((a,b)=>(a.due||'9999') > (b.due||'9999') ? 1 : -1);
+  if (settings.sort === 'desc') arr.sort((a,b)=>(a.due||'0000') < (b.due||'0000') ? 1 : -1);
+
+  canvas.innerHTML = '';
+  arr.forEach(task=>{
+    const card = makeCard(task);
+    canvas.appendChild(card);
+
+    if (settings.mode === 'free'){
+      card.style.position = 'absolute';
+      if (typeof task.x !== 'number' || typeof task.y !== 'number'){
+        const rect = canvas.getBoundingClientRect();
+        task.x = Math.max(12, Math.min(rect.width - 240, Math.random() * (rect.width - 120)));
+        task.y = Math.max(12, Math.min(rect.height - 120, Math.random() * (rect.height - 120)));
+        saveState();
+      }
+      card.style.left = task.x + 'px';
+      card.style.top = task.y + 'px';
+    } else {
+      card.style.position = 'relative';
+      card.style.left = ''; card.style.top = '';
+    }
+
+    // adjust title/width if it fits
+    requestAnimationFrame(()=> adjustCardForTitle(card, task));
+  });
+
+  statusCount.textContent = tasks.length;
+  attachGridHandlers();
+}
+
+/* drag & resize implementations */
+function startDragCard(e, card, task){
+  if (e.button && e.button !== 0) return;
+  card.setPointerCapture(e.pointerId); card.classList.add('dragging');
+  const parentRect = canvas.getBoundingClientRect();
+  const rect = card.getBoundingClientRect();
+  const offsetX = e.clientX - rect.left;
+  const offsetY = e.clientY - rect.top;
+  function onMove(ev){
+    const nx = ev.clientX - parentRect.left - offsetX;
+    const ny = ev.clientY - parentRect.top - offsetY;
+    card.style.left = nx + 'px'; card.style.top = ny + 'px';
+  }
+  function onUp(ev){
+    try { card.releasePointerCapture(e.pointerId); } catch(_){}
+    card.classList.remove('dragging');
+    task.x = parseFloat(card.style.left || 0); task.y = parseFloat(card.style.top || 0);
+    saveState();
+    card.removeEventListener('pointermove', onMove);
+    card.removeEventListener('pointerup', onUp);
+  }
+  card.addEventListener('pointermove', onMove);
+  card.addEventListener('pointerup', onUp);
+}
+
+function startResizeCard(e, card, task){
+  if (e.button && e.button !== 0) return;
+  card.setPointerCapture(e.pointerId); card.classList.add('dragging');
+  const startRect = card.getBoundingClientRect(); const startW = startRect.width; const startH = startRect.height;
+  const startX = e.clientX; const startY = e.clientY;
+  function onMove(ev){
+    let nw = startW + (ev.clientX - startX);
+    let nh = startH + (ev.clientY - startY);
+    const minW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-min-w')) || 160;
+    const minH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-min-h')) || 80;
+    const maxW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-max-w')) || 760;
+    const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-max-h')) || 1100;
+    nw = Math.max(minW, Math.min(maxW, nw)); nh = Math.max(minH, Math.min(maxH, nh));
+    card.style.width = nw + 'px'; card.style.height = nh + 'px';
+  }
+  function onUp(ev){
+    try { card.releasePointerCapture(e.pointerId); } catch(_){}
+    card.classList.remove('dragging');
+    task.w = parseFloat(card.style.width || startW); task.h = parseFloat(card.style.height || startH);
+    saveState();
+    card.removeEventListener('pointermove', onMove);
+    card.removeEventListener('pointerup', onUp);
+  }
+  card.addEventListener('pointermove', onMove);
+  card.addEventListener('pointerup', onUp);
+}
+
+/* Grid drag handlers (HTML5) */
+let dragSrc = null;
+function gridDragStart(e){ dragSrc = e.currentTarget; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', dragSrc.dataset.id); dragSrc.classList.add('dragging'); }
+function gridDragEnd(e){ if (dragSrc) dragSrc.classList.remove('dragging'); dragSrc = null; }
+function gridDragOver(e){ e.preventDefault(); }
+function gridDrop(e){
+  e.preventDefault(); const srcId = e.dataTransfer.getData('text/plain'); const target = e.target.closest('.card');
+  if (!srcId) return;
+  if (!target){ const si = tasks.findIndex(t=>t.id===srcId); if (si>=0){ const it = tasks.splice(si,1)[0]; tasks.push(it); saveState(); render(); } return; }
+  const dstId = target.dataset.id; if (srcId===dstId) return;
+  const s = tasks.findIndex(t=>t.id===srcId); const d = tasks.findIndex(t=>t.id===dstId);
+  if (s<0||d<0) return; const it = tasks.splice(s,1)[0]; tasks.splice(d,0,it); saveState(); render();
+}
+
+/* Attach only grid-related handlers globally (no cloning) */
+function attachGridHandlers(){
+  if (settings.mode === 'grid'){
+    document.querySelectorAll('.card').forEach(card=>{
+      card.setAttribute('draggable','true');
+      card.removeEventListener('dragstart', gridDragStart);
+      card.removeEventListener('dragend', gridDragEnd);
+      card.addEventListener('dragstart', gridDragStart);
+      card.addEventListener('dragend', gridDragEnd);
+    });
+    canvas.addEventListener('dragover', gridDragOver);
+    canvas.addEventListener('drop', gridDrop);
+  } else {
+    document.querySelectorAll('.card').forEach(card=> card.removeAttribute('draggable'));
+    canvas.removeEventListener('dragover', gridDragOver);
+    canvas.removeEventListener('drop', gridDrop);
+  }
+}
+
+/* CRUD */
+function addTaskFromForm(){
+  const title = titleInput.value.trim(); if (!title){ showToast('Заголовок обязателен'); titleInput.focus(); return; }
+  const desc = descInput.value.trim(); const due = dueInput.value || null; const color = settings.selectedPaletteColor || '#FFFFFF';
+  const t = { id: uid(), title, desc, due, done:false, x:null, y:null, w:260, h:120, color };
+  tasks.push(t); saveState(); render();
+  titleInput.value=''; descInput.value=''; dueInput.value='';
+  showToast('Задача добавлена');
+}
+addBtn.addEventListener('click', addTaskFromForm);
+titleInput.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ e.preventDefault(); addTaskFromForm(); }});
+
+toggleDescBtn.addEventListener('click', ()=>{ const show = descInput.style.display !== 'block'; descInput.style.display = show ? 'block' : 'none'; toggleDescBtn.setAttribute('aria-pressed', String(show)); if(show) descInput.focus(); });
+
+document.querySelectorAll('.pal').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.pal').forEach(x=> x.style.outline='');
+    b.style.outline = '2px solid rgba(37,99,235,0.18)';
+    settings.selectedPaletteColor = b.dataset.color;
+  });
+});
+
+/* edit modal */
+let editingId = null;
+function openEdit(id){
+  const t = tasks.find(x=>x.id===id); if(!t) return;
+  editingId = id;
+  editTitle.value = t.title; editDesc.value = t.desc || ''; editDue.value = t.due || ''; editColor.value = t.color || '#ffffff'; editDone.checked = !!t.done;
+  modal.style.display = 'flex'; editTitle.focus();
+}
+saveEditBtn.addEventListener('click', ()=>{
+  if(!editingId) return;
+  const t = tasks.find(x=>x.id===editingId); if(!t) return;
+  const newTitle = editTitle.value.trim(); if(!newTitle){ showToast('Заголовок обязателен'); return; }
+  t.title = newTitle; t.desc = editDesc.value.trim(); t.due = editDue.value || null; t.color = editColor.value || '#ffffff'; t.done = !!editDone.checked;
+  saveState(); render(); closeModal(); showToast('Изменения сохранены');
+});
+cancelEditBtn.addEventListener('click', closeModal);
+modal.addEventListener('click', (e)=>{ if (e.target === modal) closeModal(); });
+function closeModal(){ modal.style.display='none'; editingId=null; }
+
+/* controls */
+filterSel.addEventListener('change', (e)=>{ settings.filter = e.target.value; saveState(); render(); });
+sortSel.addEventListener('change', (e)=>{ settings.sort = e.target.value; saveState(); render(); });
+
+modeToggle.addEventListener('click', ()=>{
+  settings.mode = settings.mode === 'grid' ? 'free' : 'grid';
+  modeToggle.setAttribute('aria-pressed', settings.mode === 'grid' ? 'true' : 'false');
+  if (settings.mode === 'free'){
+    const rect = canvas.getBoundingClientRect();
+    document.querySelectorAll('.card').forEach(card=>{
+      const id = card.dataset.id; const t = tasks.find(x=>x.id===id);
+      const r = card.getBoundingClientRect();
+      t.x = Math.max(8, r.left - rect.left); t.y = Math.max(8, r.top - rect.top);
+    });
+  }
+  saveState(); render();
+});
+
+themeToggle.addEventListener('click', ()=>{
+  const html = document.documentElement;
+  html.classList.add('theme-anim'); setTimeout(()=> html.classList.remove('theme-anim'), 600);
+  settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(); saveState();
+});
+function applyTheme(first=false){
+  document.documentElement.setAttribute('data-theme', settings.theme === 'dark' ? 'dark' : 'light');
+  if (settings.theme === 'dark') document.body.style.background = 'linear-gradient(180deg,#06060a 0%, #0b0c10 100%)';
+  else document.body.style.background = 'linear-gradient(180deg,#ffffff 0%, #f7fbff 100%)';
+}
+
+clearBtn.addEventListener('click', ()=>{
+  if (!confirm('Удалить все задачи и настройки?')) return;
+  localStorage.removeItem(STORE_TASKS); localStorage.removeItem(STORE_SETTINGS); tasks=[]; settings={mode:'free',theme:'light',filter:'all',sort:'none',selectedPaletteColor:'#FFFFFF'}; applyTheme(); render(); showToast('Данные сброшены');
+});
+
+/* init */
+loadState();
+filterSel.value = settings.filter || 'all';
+sortSel.value = settings.sort || 'none';
+modeToggle.setAttribute('aria-pressed', settings.mode === 'grid' ? 'true' : 'false');
+themeToggle.setAttribute('aria-pressed', settings.theme === 'dark' ? 'true' : 'false');
+render();
+
+/* accessibility nicety */
+(function(){ window.addEventListener('keydown', e=>{ if(e.key==='Tab') document.body.classList.add('kbd'); }); window.addEventListener('mousedown', ()=> document.body.classList.remove('kbd')); })();
+
+/* expose for debug */
+window.simpletask = { tasks, settings, saveState, render };
+</script>
+</body>
+</html>
